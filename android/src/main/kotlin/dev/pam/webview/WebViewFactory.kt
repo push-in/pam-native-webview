@@ -5,7 +5,10 @@ import android.view.View
 import dev.pam.nativeapp.views.NativeViewFactory
 import dev.pam.nativeapp.protocol.WireValue
 
-class WebViewFactory : NativeViewFactory {
+class WebViewFactory() : NativeViewFactory {
+    /** The generated plugin registry builds every module and view factory with the app context. */
+    constructor(@Suppress("UNUSED_PARAMETER") context: Context) : this()
+
     override fun create(context: Context, emit: (ByteArray) -> Unit): View = PamWebView(context)
     override fun update(view: View, properties: Map<String, WireValue>) = Unit
     override fun release(view: View) { (view as PamWebView).onProtocolEvent = null; view.destroy() }

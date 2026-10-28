@@ -1,0 +1,41 @@
+{
+    "$schema": "vendor/pushinbr/pam-native/resources/pam-native.plugin.schema.json",
+    "version": 1,
+    "protocol": 1,
+    "pamNative": {
+        "minimum": "1.46.0",
+        "maximumExclusive": "2.0.0"
+    },
+    "php": {
+        "provider": "Pam\\Native\\WebView\\WebViewPluginProvider"
+    },
+    "android": {
+        "namespace": "dev.pam.webview",
+        "minSdk": 26,
+        "permissions": [],
+        "dependencies": [],
+        "sourceDirs": [
+            "android/src/main/kotlin"
+        ]
+    },
+    "ios": {
+        "minimumVersion": "15.0",
+        "sourceDirs": [
+            "ios/Sources"
+        ],
+        "frameworks": [
+            "WebKit",
+            "UIKit"
+        ],
+        "usageDescriptions": {}
+    },
+    "idl": "pam-native.idl.json",
+    "modules": [],
+    "views": [
+        {
+            "name": "webview",
+            "class": "dev.pam.webview.WebViewFactory",
+            "iosClass": "WebViewFactory"
+        }
+    ]
+}

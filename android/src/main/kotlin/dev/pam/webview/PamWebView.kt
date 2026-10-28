@@ -56,6 +56,22 @@ internal object PamWebBridge {
     fun runs(hostActive: Boolean, shown: Boolean): Boolean = hostActive && shown
 }
 
+/** Existing reserved core protocol IDs; never renumbered by the plugin. */
+private object WebViewWire {
+    const val WEB_VIEW_SOURCE = 325
+    const val WEB_VIEW_JAVA_SCRIPT_ENABLED = 326
+    const val WEB_VIEW_DOM_STORAGE_ENABLED = 327
+    const val WEB_VIEW_USER_AGENT = 328
+    const val WEB_VIEW_INJECTED_JAVA_SCRIPT = 329
+    const val WEB_VIEW_ALLOWS_INLINE_MEDIA = 330
+    const val WEB_VIEW_ALLOWED_HOSTS = 366
+    const val SCROLL_ENABLED = 64
+    const val SCROLL_OVER_SCROLL_MODE = 181
+    const val WEB_VIEW_LOAD = 48
+    const val WEB_VIEW_ERROR = 49
+    const val WEB_VIEW_MESSAGE = 50
+}
+
 @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
 internal class PamWebView(context: Context) : WebView(context), NativePropertyView {
     override var onProtocolEvent: ((Int, ByteArray) -> Unit)? = null
@@ -64,15 +80,15 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     override fun releaseHost() = destroy()
     override fun applyProtocolProperty(key: Int, value: WireValue?) {
         when (key) {
-            325 -> setSource((value as? WireValue.Text)?.value ?: "")
-            326 -> setJavaScriptEnabled((value as? WireValue.Flag)?.value ?: true)
-            327 -> setDomStorageEnabled((value as? WireValue.Flag)?.value ?: true)
-            328 -> setUserAgent((value as? WireValue.Text)?.value ?: "")
-            329 -> setInjectedJavaScript((value as? WireValue.Text)?.value ?: "")
-            330 -> setAllowsInlineMedia((value as? WireValue.Flag)?.value ?: true)
-            366 -> setAllowedHosts((value as? WireValue.Text)?.value ?: "")
-            64 -> setScrollEnabled((value as? WireValue.Flag)?.value ?: true)
-            181 -> setOverScrollModeValue((value as? WireValue.Integer)?.value?.toInt() ?: 1)
+            WebViewWire.WEB_VIEW_SOURCE -> setSource((value as? WireValue.Text)?.value ?: "")
+            WebViewWire.WEB_VIEW_JAVA_SCRIPT_ENABLED -> setJavaScriptEnabled((value as? WireValue.Flag)?.value ?: true)
+            WebViewWire.WEB_VIEW_DOM_STORAGE_ENABLED -> setDomStorageEnabled((value as? WireValue.Flag)?.value ?: true)
+            WebViewWire.WEB_VIEW_USER_AGENT -> setUserAgent((value as? WireValue.Text)?.value ?: "")
+            WebViewWire.WEB_VIEW_INJECTED_JAVA_SCRIPT -> setInjectedJavaScript((value as? WireValue.Text)?.value ?: "")
+            WebViewWire.WEB_VIEW_ALLOWS_INLINE_MEDIA -> setAllowsInlineMedia((value as? WireValue.Flag)?.value ?: true)
+            WebViewWire.WEB_VIEW_ALLOWED_HOSTS -> setAllowedHosts((value as? WireValue.Text)?.value ?: "")
+            WebViewWire.SCROLL_ENABLED -> setScrollEnabled((value as? WireValue.Flag)?.value ?: true)
+            WebViewWire.SCROLL_OVER_SCROLL_MODE -> setOverScrollModeValue((value as? WireValue.Integer)?.value?.toInt() ?: 1)
         }
     }
     private val defaultUserAgent = settings.userAgentString
@@ -93,9 +109,9 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     var onMessage: ((String, String) -> Unit)? = null
 
     init {
-        onLoad = { onProtocolEvent?.invoke(48, ByteArray(0)) }
-        onError = { message -> onProtocolEvent?.invoke(49, WireMap.encode(mapOf("message" to WireValue.Text(message)))) }
-        onMessage = { message, url -> onProtocolEvent?.invoke(50, WireMap.encode(mapOf("message" to WireValue.Text(message), "url" to WireValue.Text(url)))) }
+        onLoad = { onProtocolEvent?.invoke(WebViewWire.WEB_VIEW_LOAD, ByteArray(0)) }
+        onError = { message -> onProtocolEvent?.invoke(WebViewWire.WEB_VIEW_ERROR, WireMap.encode(mapOf("message" to WireValue.Text(message)))) }
+        onMessage = { message, url -> onProtocolEvent?.invoke(WebViewWire.WEB_VIEW_MESSAGE, WireMap.encode(mapOf("message" to WireValue.Text(message), "url" to WireValue.Text(url)))) }
 
         // Hardened defaults: no file/content access, no popups or new
         // windows, no mixed content, no geolocation, no third-party cookies

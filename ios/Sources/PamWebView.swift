@@ -1,7 +1,4 @@
-import AVFoundation
-import AVKit
 import Foundation
-import Photos
 import UIKit
 import WebKit
 import PamNative
@@ -35,6 +32,22 @@ enum PamWebBridge {
     }
 }
 
+/// Existing reserved core protocol IDs; never renumbered by the plugin.
+private enum WebViewWire {
+    static let webViewSource = 325
+    static let webViewJavaScriptEnabled = 326
+    static let webViewDomStorageEnabled = 327
+    static let webViewUserAgent = 328
+    static let webViewInjectedJavaScript = 329
+    static let webViewAllowsInlineMedia = 330
+    static let webViewAllowedHosts = 366
+    static let scrollEnabled = 64
+    static let scrollOverScrollMode = 181
+    static let webViewLoad = 48
+    static let webViewError = 49
+    static let webViewMessage = 50
+}
+
 final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler, NativePropertyView {
     func releaseHost() {
         cancelLoadTimeout()
@@ -46,14 +59,14 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler,
     var onProtocolEvent: ((Int, Data) -> Void)?
     func applyProtocolProperty(key: Int, value: WireValue?) {
         switch key {
-        case 325: setSource(value?.webText ?? "")
-        case 326: setJavaScriptEnabled(value?.webFlag ?? true)
-        case 327: setDomStorageEnabled(value?.webFlag ?? true)
-        case 328: setUserAgent(value?.webText ?? "")
-        case 329: setInjectedJavaScript(value?.webText ?? "")
-        case 330: setAllowsInlineMedia(value?.webFlag ?? true)
-        case 366: setAllowedHosts(value?.webText ?? "")
-        case 64: setScrollEnabled(value?.webFlag ?? true)
+        case WebViewWire.webViewSource: setSource(value?.webText ?? "")
+        case WebViewWire.webViewJavaScriptEnabled: setJavaScriptEnabled(value?.webFlag ?? true)
+        case WebViewWire.webViewDomStorageEnabled: setDomStorageEnabled(value?.webFlag ?? true)
+        case WebViewWire.webViewUserAgent: setUserAgent(value?.webText ?? "")
+        case WebViewWire.webViewInjectedJavaScript: setInjectedJavaScript(value?.webText ?? "")
+        case WebViewWire.webViewAllowsInlineMedia: setAllowsInlineMedia(value?.webFlag ?? true)
+        case WebViewWire.webViewAllowedHosts: setAllowedHosts(value?.webText ?? "")
+        case WebViewWire.scrollEnabled: setScrollEnabled(value?.webFlag ?? true)
         default: break
         }
     }
@@ -81,9 +94,9 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler,
         configuration.dataDetectorTypes = []
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         super.init(frame: .zero, configuration: configuration)
-        onLoad = { [weak self] in self?.onProtocolEvent?(48, Data()) }
-        onError = { [weak self] message in self?.onProtocolEvent?(49, (try? WireMap.encode(["message": .text(message)])) ?? Data()) }
-        onMessage = { [weak self] message, url in self?.onProtocolEvent?(50, (try? WireMap.encode(["message": .text(message), "url": .text(url)])) ?? Data()) }
+        onLoad = { [weak self] in self?.onProtocolEvent?(WebViewWire.webViewLoad, Data()) }
+        onError = { [weak self] message in self?.onProtocolEvent?(WebViewWire.webViewError, (try? WireMap.encode(["message": .text(message)])) ?? Data()) }
+        onMessage = { [weak self] message, url in self?.onProtocolEvent?(WebViewWire.webViewMessage, (try? WireMap.encode(["message": .text(message), "url": .text(url)])) ?? Data()) }
         navigationDelegate = self
         // No link previews (long press) and no back/forward swipes inside the page.
         allowsLinkPreview = false

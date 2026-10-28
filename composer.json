@@ -9,8 +9,7 @@
         "php",
         "android",
         "ios",
-        "location",
-        "gps"
+        "webview"
     ],
     "require": {
         "php": "^8.5",

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3 - 2026-11-08
+
+- Every `v*` publication tag is certified by the PAM Native ecosystem gate
+  (`push-in/pam` `ecosystem-compatibility.yml`). No code changes.
+
 ## 0.1.2 - 2026-10-28
 
 - Android: `WebViewFactory` has a `(Context)` constructor, which the

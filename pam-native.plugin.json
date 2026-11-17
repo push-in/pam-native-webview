@@ -11,7 +11,7 @@
     },
     "android": {
         "namespace": "dev.pam.webview",
-        "minSdk": 26,
+        "minSdk": 24,
         "permissions": [],
         "dependencies": [],
         "sourceDirs": [

@@ -55,7 +55,7 @@ $view = WebView::make('https://example.com/app')
 
 | Platform | Support | Notes |
 | --- | --- | --- |
-| Android | API 26+ | Platform WebView; no permissions declared |
+| Android | API 24+ | Platform WebView; no permissions declared |
 | iOS | 15.0+ | WebKit, UIKit; Swift compilation and device QA still pending |
 | PAM Native | 1.46.0 to < 2.0.0 | From `pam-native.plugin.json`; PHP 8.5+ |
 

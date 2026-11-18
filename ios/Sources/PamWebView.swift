@@ -30,6 +30,19 @@ enum PamWebBridge {
     static func runsOnChange(previous: String, next: String, pageLoaded: Bool) -> Bool {
         pageLoaded && !next.isEmpty && next != previous
     }
+
+    /// `WebViewErrorCode` values (PHP); the `code` field of `WEB_VIEW_ERROR`.
+    static let errorLoad = "load"
+    static let errorTimeout = "timeout"
+    static let errorBlocked = "blocked"
+    static let errorProcessGone = "process-gone"
+
+    /// A main-frame navigation outside `allowedHosts` is only cancelled once a
+    /// page is shown (a link, `target=_blank`, a script redirect). Before the
+    /// first page finishes it fails the load, since nothing would ever show.
+    static func blockedNavigationFails(pageLoaded: Bool) -> Bool {
+        !pageLoaded
+    }
 }
 
 /// Existing reserved core protocol IDs; never renumbered by the plugin.
@@ -71,7 +84,7 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler,
         }
     }
     var onLoad: (() -> Void)?
-    var onError: ((String) -> Void)?
+    var onError: ((String, String) -> Void)?
     /// Message text and the URL of the page that posted it.
     var onMessage: ((String, String) -> Void)?
     private var source = ""
@@ -95,7 +108,12 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler,
         configuration.preferences.javaScriptCanOpenWindowsAutomatically = false
         super.init(frame: .zero, configuration: configuration)
         onLoad = { [weak self] in self?.onProtocolEvent?(WebViewWire.webViewLoad, Data()) }
-        onError = { [weak self] message in self?.onProtocolEvent?(WebViewWire.webViewError, (try? WireMap.encode(["message": .text(message)])) ?? Data()) }
+        onError = { [weak self] message, code in
+            self?.onProtocolEvent?(
+                WebViewWire.webViewError,
+                (try? WireMap.encode(["message": .text(message), "code": .text(code)])) ?? Data()
+            )
+        }
         onMessage = { [weak self] message, url in self?.onProtocolEvent?(WebViewWire.webViewMessage, (try? WireMap.encode(["message": .text(message), "url": .text(url)])) ?? Data()) }
         navigationDelegate = self
         // No link previews (long press) and no back/forward swipes inside the page.
@@ -159,8 +177,9 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler,
                 .filter { !$0.isEmpty }
         )
         if let current = url, !allows(current) {
+            cancelLoadTimeout()
             stopLoading()
-            onError?("WebView navigation was blocked by the allowed-host policy")
+            onError?("WebView navigation was blocked by the allowed-host policy", PamWebBridge.errorBlocked)
         }
     }
 
@@ -176,11 +195,22 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler,
         }
         if allows(target) {
             decisionHandler(.allow)
-        } else {
-            cancelLoadTimeout()
-            onError?("WebView blocked navigation to \(target.host ?? "unknown host")")
-            decisionHandler(.cancel)
+            return
         }
+        decisionHandler(.cancel)
+        if PamWebBridge.blockedNavigationFails(pageLoaded: pageLoaded) {
+            cancelLoadTimeout()
+            onError?("WebView blocked navigation to \(target.host ?? "unknown host")", PamWebBridge.errorBlocked)
+        }
+    }
+
+    /// iOS killed the WebContent process (memory pressure while a game is open
+    /// or in the background, or a crash): the page is blank and nothing
+    /// reloads it. The page owner remounts it (new key) or shows a failure.
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        cancelLoadTimeout()
+        pageLoaded = false
+        onError?("WebView content process terminated", PamWebBridge.errorProcessGone)
     }
 
     private func allows(_ url: URL) -> Bool {
@@ -195,7 +225,7 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler,
         cancelLoadTimeout()
         let timeout = DispatchWorkItem { [weak self] in
             self?.stopLoading()
-            self?.onError?("WebView navigation timed out after 30 seconds")
+            self?.onError?("WebView navigation timed out after 30 seconds", PamWebBridge.errorTimeout)
         }
         loadTimeout = timeout
         DispatchQueue.main.asyncAfter(deadline: .now() + 30, execute: timeout)
@@ -225,7 +255,7 @@ final class PamWebView: WKWebView, WKNavigationDelegate, WKScriptMessageHandler,
         withError error: Error
     ) {
         cancelLoadTimeout()
-        onError?(error.localizedDescription)
+        onError?(error.localizedDescription, PamWebBridge.errorLoad)
     }
 
     func userContentController(

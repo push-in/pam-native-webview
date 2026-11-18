@@ -36,6 +36,7 @@ New to PAM? Create a project with `pam init my-app --template native` (see the [
 
 ```php
 use Pam\Native\WebView\WebView;
+use Pam\Native\WebView\WebViewErrorCode;
 
 $view = WebView::make('https://example.com/app')
     ->allowedHosts(['example.com', 'cdn.example.com'])
@@ -43,8 +44,8 @@ $view = WebView::make('https://example.com/app')
         // Posted by the page with window.PamNative.postMessage(text).
         // Check $url before trusting the message.
     })
-    ->onError(function (string $message): void {
-        // Error message reported by the native view.
+    ->onError(function (string $message, WebViewErrorCode $code): void {
+        // ProcessGone: remount the view (new key) or show a failure.
     });
 ```
 
@@ -68,9 +69,25 @@ $view = WebView::make('https://example.com/app')
 | `javaScriptEnabled(bool)`, `domStorageEnabled(bool)`, `allowsInlineMedia(bool)` | Default `true` |
 | `userAgent(?string)` | Custom user agent; `null` restores the default |
 | `injectedJavaScript(string)` | Script run on every load (at most 1 MiB) |
-| `allowedHosts(list<string>)` | Navigation host allowlist |
+| `allowedHosts(list<string>)` | Navigation host allowlist (see [Errors](#errors)) |
 | `scrollEnabled(bool)`, `overScrollMode(ScrollOverScrollMode)` | `scrollEnabled(false)` stops scrolling, bounce and over-scroll (full-screen pages such as games) |
-| `onLoad(Closure)`, `onError(Closure(string))`, `onMessage(Closure(string $message, string $url))` | Native events |
+| `onLoad(Closure)`, `onError(Closure(string $message, WebViewErrorCode $code))`, `onMessage(Closure(string $message, string $url))` | Native events; one-argument `onError` handlers keep working |
+
+<a id="errors"></a>
+### Errors
+
+`onError` reports main-frame failures with a `WebViewErrorCode`:
+
+| Code | When | Native |
+| --- | --- | --- |
+| `Load` | The main-frame load failed (no connection, DNS, TLS) | Android `onReceivedError`, iOS `didFailProvisionalNavigation` |
+| `Timeout` | The first page did not finish within 30 seconds | Both |
+| `Blocked` | The page being loaded, or a redirect while it loads, is outside `allowedHosts`, or `allowedHosts` changed to exclude the current page | Both |
+| `ProcessGone` | The web content process died | Android `onRenderProcessGone` (8.0+), iOS `webViewWebContentProcessDidTerminate` |
+
+A link, `target=_blank` or script redirect outside `allowedHosts` on a page that already finished loading is only cancelled: the page stays and `onError` is not called (react-native-webview `onShouldStartLoadWithRequest` returning `false`). Open such links yourself if needed.
+
+`ProcessGone`: on Android the renderer crashed or the system killed it (memory pressure while the page is open or in the background). Android would otherwise kill the whole app; the plugin keeps the app running, hides that WebView and destroys it once it leaves the screen, since a WebView whose renderer died can never be used again. On iOS the WebContent process was terminated and the page is blank. On both, remount the web view with a new key to load again, or show a failure. Native sides older than 0.2.0 send no code, which reads as `Load`.
 
 <a id="core-extraction"></a>
 ## <picture><img src=".github/assets/icons/layers.svg" width="22" height="22" alt=""></picture> Core extraction (1.46)

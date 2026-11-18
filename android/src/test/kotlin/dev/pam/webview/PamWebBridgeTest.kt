@@ -44,4 +44,18 @@ class PamWebBridgeTest {
         assertFalse(PamWebBridge.runs(hostActive = false, shown = true))
         assertFalse(PamWebBridge.runs(hostActive = true, shown = false))
     }
+
+    @Test
+    fun aBlockedNavigationOnlyFailsALoadThatNeverShowedAPage() {
+        assertTrue(PamWebBridge.blockedNavigationFails(pageLoaded = false))
+        assertFalse(PamWebBridge.blockedNavigationFails(pageLoaded = true))
+    }
+
+    @Test
+    fun errorCodesMatchThePhpEnum() {
+        assertEquals("load", PamWebBridge.ERROR_LOAD)
+        assertEquals("timeout", PamWebBridge.ERROR_TIMEOUT)
+        assertEquals("blocked", PamWebBridge.ERROR_BLOCKED)
+        assertEquals("process-gone", PamWebBridge.ERROR_PROCESS_GONE)
+    }
 }

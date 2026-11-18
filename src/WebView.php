@@ -89,19 +89,31 @@ final class WebView extends Element
         return $this->withProperty(PropKey::ScrollOverScrollMode, $mode->value);
     }
 
-        public function onLoad(Closure $handler): self
+    public function onLoad(Closure $handler): self
     {
         return $this->withEvent(EventKind::WebViewLoad, $handler);
     }
 
-    /** @param Closure(string): void $handler */
+    /**
+     * Main-frame failures. The second argument says why
+     * (`WebViewErrorCode`): a one-argument handler keeps working.
+     * `ProcessGone` means the web content process died; the app keeps
+     * running and the view must be remounted (new key) to load again.
+     *
+     * @param Closure(string, WebViewErrorCode): void $handler
+     */
     public function onError(Closure $handler): self
     {
         return $this->withEvent(
             EventKind::WebViewError,
-            static fn (string $payload): mixed => $handler(
-                (string) (Wire::decodeMap($payload)['message'] ?? ''),
-            ),
+            static function (string $payload) use ($handler): mixed {
+                $values = Wire::decodeMap($payload);
+
+                return $handler(
+                    (string) ($values['message'] ?? ''),
+                    WebViewErrorCode::fromWire($values['code'] ?? null),
+                );
+            },
         );
     }
 

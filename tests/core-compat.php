@@ -80,3 +80,37 @@ $assert(
     'WebView messages must carry the posting page URL and keep one-argument handlers working.',
 );
 
+
+// Errors carry a code; one-argument handlers keep working and an older
+// native side (no code) reads as a load failure.
+$webErrors = [];
+$errorWebView = WebView::make('https://example.com/app')->onError(
+    static function (string $message, \Pam\Native\WebView\WebViewErrorCode $code) use (&$webErrors): void {
+        $webErrors[] = [$message, $code];
+    },
+);
+$errorWebView->events()[EventKind::WebViewError->value](Wire::map([
+    'message' => 'WebView renderer crashed',
+    'code' => 'process-gone',
+]));
+$errorWebView->events()[EventKind::WebViewError->value](Wire::map(['message' => 'offline']));
+$errorWebView->events()[EventKind::WebViewError->value](Wire::map(['message' => 'x', 'code' => 'future-code']));
+$legacyErrors = [];
+WebView::make('https://example.com/app')->onError(
+    static function (string $message) use (&$legacyErrors): void {
+        $legacyErrors[] = $message;
+    },
+)->events()[EventKind::WebViewError->value](Wire::map(['message' => 'timed out', 'code' => 'timeout']));
+$assert(
+    $webErrors === [
+        ['WebView renderer crashed', \Pam\Native\WebView\WebViewErrorCode::ProcessGone],
+        ['offline', \Pam\Native\WebView\WebViewErrorCode::Load],
+        ['x', \Pam\Native\WebView\WebViewErrorCode::Load],
+    ] && $legacyErrors === ['timed out'],
+    'WebView errors must carry a WebViewErrorCode and keep one-argument handlers working.',
+);
+$assert(
+    array_map(static fn ($case) => $case->value, \Pam\Native\WebView\WebViewErrorCode::cases())
+        === ['load', 'timeout', 'blocked', 'process-gone'],
+    'WebViewErrorCode values must match the native error codes.',
+);

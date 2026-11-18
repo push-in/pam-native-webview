@@ -5,13 +5,16 @@ import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.protocol.WireMap
 
 import android.annotation.SuppressLint
+import android.annotation.TargetApi
 import android.content.Context
 import android.net.Uri
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.View
 import android.webkit.CookieManager
 import android.webkit.JavascriptInterface
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
@@ -54,6 +57,20 @@ internal object PamWebBridge {
 
     /** Paused while the host app is in the background or the view is not shown (covered route, hidden tab). */
     fun runs(hostActive: Boolean, shown: Boolean): Boolean = hostActive && shown
+
+    /** `WebViewErrorCode` values (PHP); the `code` field of `WEB_VIEW_ERROR`. */
+    const val ERROR_LOAD = "load"
+    const val ERROR_TIMEOUT = "timeout"
+    const val ERROR_BLOCKED = "blocked"
+    const val ERROR_PROCESS_GONE = "process-gone"
+
+    /**
+     * A main-frame navigation outside `allowedHosts` is only cancelled once a
+     * page is shown (a link, `target=_blank`, a script redirect): the page
+     * stays. Before the first page finishes it fails the load, since nothing
+     * would ever show.
+     */
+    fun blockedNavigationFails(pageLoaded: Boolean): Boolean = !pageLoaded
 }
 
 /** Existing reserved core protocol IDs; never renumbered by the plugin. */
@@ -77,8 +94,11 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     override var onProtocolEvent: ((Int, ByteArray) -> Unit)? = null
     override fun pauseHost() = onHostPause()
     override fun resumeHost() = onHostResume()
-    override fun releaseHost() = destroy()
+    override fun releaseHost() {
+        if (processGone) destroyRetired() else destroy()
+    }
     override fun applyProtocolProperty(key: Int, value: WireValue?) {
+        if (processGone) return
         when (key) {
             WebViewWire.WEB_VIEW_SOURCE -> setSource((value as? WireValue.Text)?.value ?: "")
             WebViewWire.WEB_VIEW_JAVA_SCRIPT_ENABLED -> setJavaScriptEnabled((value as? WireValue.Flag)?.value ?: true)
@@ -102,15 +122,22 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     private var overScrollModeValue = 1
     private var hostActive = true
     private var running = true
+    /** The renderer died: this WebView can never be used again (Android 8.0+ contract). */
+    private var processGone = false
     var onLoad: (() -> Unit)? = null
-    var onError: ((String) -> Unit)? = null
+    var onError: ((String, String) -> Unit)? = null
 
     /** Message text and the URL of the page that posted it. */
     var onMessage: ((String, String) -> Unit)? = null
 
     init {
         onLoad = { onProtocolEvent?.invoke(WebViewWire.WEB_VIEW_LOAD, ByteArray(0)) }
-        onError = { message -> onProtocolEvent?.invoke(WebViewWire.WEB_VIEW_ERROR, WireMap.encode(mapOf("message" to WireValue.Text(message)))) }
+        onError = { message, code ->
+            onProtocolEvent?.invoke(
+                WebViewWire.WEB_VIEW_ERROR,
+                WireMap.encode(mapOf("message" to WireValue.Text(message), "code" to WireValue.Text(code))),
+            )
+        }
         onMessage = { message, url -> onProtocolEvent?.invoke(WebViewWire.WEB_VIEW_MESSAGE, WireMap.encode(mapOf("message" to WireValue.Text(message), "url" to WireValue.Text(url)))) }
 
         // Hardened defaults: no file/content access, no popups or new
@@ -129,11 +156,11 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
         addJavascriptInterface(MessageInterface(), PamWebBridge.INTERFACE_NAME)
         webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
-                handlePamMessage(request.url) || request.isForMainFrame && !allows(request.url)
+                handlePamMessage(request.url) || request.isForMainFrame && !allowsNavigation(request.url)
 
             @Deprecated("Deprecated in Java")
             override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean =
-                Uri.parse(url).let { handlePamMessage(it) || !allows(it) }
+                Uri.parse(url).let { handlePamMessage(it) || !allowsNavigation(it) }
 
             override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
                 pageLoaded = false
@@ -158,10 +185,48 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
             ) {
                 if (request.isForMainFrame) {
                     cancelLoadTimeout()
-                    onError?.invoke(error.description.toString())
+                    onError?.invoke(error.description.toString(), PamWebBridge.ERROR_LOAD)
                 }
             }
+
+            // The default (false) kills the whole app process with the
+            // renderer (OOM kill while a game is open or in the background,
+            // or a renderer crash). Keep the app: retire this view and tell
+            // the page owner, who remounts it (new key) or shows a failure.
+            @TargetApi(Build.VERSION_CODES.O)
+            override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                if (view !== this@PamWebView) return false
+                val crashed = detail.didCrash()
+                retireAfterProcessGone()
+                onError?.invoke(
+                    if (crashed) "WebView renderer crashed" else "WebView renderer was killed by the system",
+                    PamWebBridge.ERROR_PROCESS_GONE,
+                )
+                return true
+            }
         }
+    }
+
+    /**
+     * The renderer is gone: no further call may reach this WebView. It stays
+     * in the hierarchy the renderer manages (invisible, so it never draws) and
+     * is destroyed once detached.
+     */
+    private fun retireAfterProcessGone() {
+        if (processGone) return
+        processGone = true
+        cancelLoadTimeout()
+        pageLoaded = false
+        visibility = View.INVISIBLE
+        if (!isAttachedToWindow) destroyRetired()
+    }
+
+    private var retiredDestroyed = false
+
+    private fun destroyRetired() {
+        if (retiredDestroyed) return
+        retiredDestroyed = true
+        destroy()
     }
 
     /** Called on a binder thread; delivered on the main thread with the page URL of that moment. */
@@ -170,12 +235,12 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
         fun postMessage(value: String?) {
             if (!PamWebBridge.accepts(value)) return
             val text = value ?: return
-            main.post { onMessage?.invoke(text, url.orEmpty()) }
+            main.post { if (!processGone) onMessage?.invoke(text, url.orEmpty()) }
         }
     }
 
     fun setSource(value: String) {
-        if (source == value) return
+        if (processGone || source == value) return
         source = value
         pageLoaded = false
         if (value.isEmpty()) {
@@ -192,18 +257,22 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     }
 
     fun setJavaScriptEnabled(value: Boolean) {
+        if (processGone) return
         settings.javaScriptEnabled = value
     }
 
     fun setDomStorageEnabled(value: Boolean) {
+        if (processGone) return
         settings.domStorageEnabled = value
     }
 
     fun setUserAgent(value: String) {
+        if (processGone) return
         settings.userAgentString = value.ifEmpty { defaultUserAgent }
     }
 
     fun setInjectedJavaScript(value: String) {
+        if (processGone) return
         val runNow = settings.javaScriptEnabled &&
             PamWebBridge.runsOnChange(injectedJavaScript, value, pageLoaded)
         injectedJavaScript = value
@@ -211,10 +280,12 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     }
 
     fun setAllowsInlineMedia(value: Boolean) {
+        if (processGone) return
         settings.mediaPlaybackRequiresUserGesture = !value
     }
 
     fun setScrollEnabled(value: Boolean) {
+        if (processGone) return
         scrollEnabled = value
         isVerticalScrollBarEnabled = value
         isHorizontalScrollBarEnabled = value
@@ -222,11 +293,13 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     }
 
     fun setOverScrollModeValue(value: Int) {
+        if (processGone) return
         overScrollModeValue = value
         overScrollMode = PamWebBridge.overScrollMode(overScrollModeValue, scrollEnabled)
     }
 
     fun setAllowedHosts(value: String) {
+        if (processGone) return
         allowedHosts = value.lineSequence()
             .map(String::trim)
             .filter(String::isNotEmpty)
@@ -234,8 +307,9 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
             .toSet()
         val current = url?.let(Uri::parse)
         if (current != null && !allows(current)) {
+            cancelLoadTimeout()
             stopLoading()
-            onError?.invoke("WebView navigation was blocked by the allowed-host policy")
+            onError?.invoke("WebView navigation was blocked by the allowed-host policy", PamWebBridge.ERROR_BLOCKED)
         }
     }
 
@@ -261,6 +335,7 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
 
     /** A covered route or a background app pauses the page (no frames, timers or animations of this view). */
     private fun syncRunning() {
+        if (processGone) return
         val next = PamWebBridge.runs(hostActive, isShown && windowVisibility == View.VISIBLE)
         if (next == running) return
         running = next
@@ -277,19 +352,24 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     private fun allows(uri: Uri): Boolean {
         if (allowedHosts.isEmpty() || uri.scheme == "about" || uri.scheme == "data") return true
         val host = uri.host?.lowercase() ?: return false
-        val allowed = host in allowedHosts
-        if (!allowed) {
+        return host in allowedHosts
+    }
+
+    /** Main-frame navigation check: a blocked one is cancelled, and fails only a load that never showed a page. */
+    private fun allowsNavigation(uri: Uri): Boolean {
+        if (allows(uri)) return true
+        if (PamWebBridge.blockedNavigationFails(pageLoaded)) {
             cancelLoadTimeout()
-            onError?.invoke("WebView blocked navigation to $host")
+            onError?.invoke("WebView blocked navigation to ${uri.host.orEmpty()}", PamWebBridge.ERROR_BLOCKED)
         }
-        return allowed
+        return false
     }
 
     private fun scheduleLoadTimeout() {
         cancelLoadTimeout()
         val timeout = Runnable {
             stopLoading()
-            onError?.invoke("WebView navigation timed out after 30 seconds")
+            onError?.invoke("WebView navigation timed out after 30 seconds", PamWebBridge.ERROR_TIMEOUT)
         }
         loadTimeout = timeout
         main.postDelayed(timeout, 30_000)
@@ -303,5 +383,6 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
     override fun onDetachedFromWindow() {
         cancelLoadTimeout()
         super.onDetachedFromWindow()
+        if (processGone) destroyRetired()
     }
 }

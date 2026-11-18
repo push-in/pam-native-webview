@@ -37,4 +37,17 @@ final class PamWebBridgeTests: XCTestCase {
         webView.setScrollEnabled(true)
         XCTAssertTrue(webView.scrollView.bounces)
     }
+
+    func testBlockedNavigationOnlyFailsALoadThatNeverShowedAPage() {
+        XCTAssertTrue(PamWebBridge.blockedNavigationFails(pageLoaded: false))
+        XCTAssertFalse(PamWebBridge.blockedNavigationFails(pageLoaded: true))
+    }
+
+    func testContentProcessTerminationReportsProcessGone() {
+        let webView = PamWebView()
+        var errors: [(String, String)] = []
+        webView.onError = { message, code in errors.append((message, code)) }
+        webView.webViewWebContentProcessDidTerminate(webView)
+        XCTAssertEqual(errors.map(\.1), [PamWebBridge.errorProcessGone])
+    }
 }

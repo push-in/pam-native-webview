@@ -5,7 +5,6 @@ import dev.pam.nativeapp.protocol.WireValue
 import dev.pam.nativeapp.protocol.WireMap
 
 import android.annotation.SuppressLint
-import android.annotation.TargetApi
 import android.content.Context
 import android.net.Uri
 import android.os.Build
@@ -193,10 +192,10 @@ internal class PamWebView(context: Context) : WebView(context), NativePropertyVi
             // renderer (OOM kill while a game is open or in the background,
             // or a renderer crash). Keep the app: retire this view and tell
             // the page owner, who remounts it (new key) or shows a failure.
-            @TargetApi(Build.VERSION_CODES.O)
             override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
                 if (view !== this@PamWebView) return false
-                val crashed = detail.didCrash()
+                // Only called on Android 8.0+, where the renderer runs out of process.
+                val crashed = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && detail.didCrash()
                 retireAfterProcessGone()
                 onError?.invoke(
                     if (crashed) "WebView renderer crashed" else "WebView renderer was killed by the system",

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0 - 2026-11-18
+
+- Fixed: Android keeps the app alive when the WebView renderer dies (onRenderProcessGone); iOS reports WebContent termination; both send onError with WebViewErrorCode::ProcessGone.
+- Changed: onError receives a WebViewErrorCode (Load, Timeout, Blocked, ProcessGone) as a second argument; navigation outside allowedHosts on a loaded page is only cancelled.
+
 ## 0.1.4 - 2026-11-17
 
 - Android 7.0/7.1 support: the plugin declares minSdk 24 and every newer Android API it uses has a version check and fallback. Requires PAM Native 1.53.1 or later.

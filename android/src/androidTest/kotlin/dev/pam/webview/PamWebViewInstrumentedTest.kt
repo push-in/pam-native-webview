@@ -78,9 +78,15 @@ class PamWebViewInstrumentedTest {
         instrumentation.runOnMainSync { view.releaseHost() }
     }
 
-    /** Before any page shows, a navigation outside allowedHosts fails the load with code blocked. */
+    /**
+     * Before any page shows, a navigation outside allowedHosts fails the load
+     * with code blocked. The Android 7 emulator WebView never consults
+     * shouldOverrideUrlLoading for this script redirect (no user gesture), so
+     * it runs from Android 8.0.
+     */
     @Test
     fun aBlockedNavigationBeforeTheFirstPageFailsTheLoad() {
+        assumeTrue(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
         val view = webView()
         instrumentation.runOnMainSync {
             view.setJavaScriptEnabled(true)
